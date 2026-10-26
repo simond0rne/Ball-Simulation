@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101318">
+  <title>Orbit — a little ball game</title>
+  <style>
+    :root { color-scheme: dark; --ink:#f5f2ea; --muted:#9298a3; --lime:#d2ff70; --bg:#101318; }
+    * { box-sizing:border-box }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:28px 18px; background:radial-gradient(ellipse at 50% 40%,#1d2229 0,#101318 66%); color:var(--ink); font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif }
+    main { width:min(100%,680px); text-align:center }
+    .eyebrow { margin:0 0 10px; color:var(--lime); font-size:11px; letter-spacing:.24em; font-weight:700; text-transform:uppercase }
+    h1 { margin:0; font-size:clamp(38px,8vw,62px); line-height:1; letter-spacing:-.065em; font-weight:650 }
+    .intro { color:var(--muted); font-size:14px; margin:14px 0 22px }
+    .stage { position:relative; width:min(100%,560px); aspect-ratio:1; margin:0 auto; border:1px solid #ffffff0d; border-radius:50%; background:radial-gradient(circle at 50% 45%,#1b2027 0,#13171d 68%,#111419 100%); box-shadow:0 28px 90px #0007,inset 0 1px #ffffff0a; overflow:hidden }
+    canvas { display:block; width:100%; height:100% }
+    .stats { position:absolute; left:50%; bottom:8%; transform:translateX(-50%); display:flex; gap:28px; pointer-events:none }
+    .stat { min-width:65px }
+    .stat strong { display:block; font-size:21px; font-variant-numeric:tabular-nums; font-weight:600 }
+    .stat span { display:block; margin-top:3px; color:#858b95; text-transform:uppercase; letter-spacing:.14em; font-size:9px; font-weight:700 }
+    .controls { display:flex; justify-content:center; align-items:center; gap:16px; margin-top:22px }
+    button { appearance:none; border:0; border-radius:999px; padding:15px 25px; background:var(--lime); color:#171b10; font:700 14px/1 ui-sans-serif,system-ui,sans-serif; cursor:pointer; box-shadow:0 5px 24px #d2ff7022; transition:transform .15s,background .15s,box-shadow .15s }
+    button.secondary { border:1px solid #ffffff24; background:#ffffff0c; color:var(--ink); box-shadow:none }
+    button.secondary:hover { background:#ffffff18; box-shadow:none }
+    button:hover { transform:translateY(-2px); background:#ddff9a; box-shadow:0 8px 30px #d2ff7038 }
+    button:active { transform:translateY(0) scale(.98) }
+    button:focus-visible { outline:3px solid white; outline-offset:4px }
+    .hint { color:var(--muted); font-size:12px }
+    .settings { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; width:min(100%,560px); margin:24px auto 0; padding:16px 18px; border:1px solid #ffffff12; border-radius:16px; background:#ffffff05; text-align:left }
+    .setting label { display:flex; justify-content:space-between; gap:6px; margin-bottom:10px; color:#c5c9cf; font-size:11px; font-weight:650 }
+    .setting output { color:var(--lime); font-variant-numeric:tabular-nums }
+    input[type="range"] { display:block; width:100%; height:4px; margin:0; accent-color:var(--lime); cursor:pointer }
+    .range-ends { display:flex; justify-content:space-between; margin-top:7px; color:#707782; font-size:9px }
+    @media(max-width:500px) { body{padding:22px 14px}.intro{font-size:13px}.controls{gap:11px}.hint{font-size:11px}.settings{gap:12px;padding:14px 12px}.setting label{font-size:10px;display:block}.setting output{display:block;margin-top:4px} }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">A tiny physics playground</p>
+    <h1>Orbit</h1>
+    <p class="intro" id="intro">Drop a ball into the ring. Every bump makes it grow.</p>
+    <section class="stage" aria-label="Ball game arena">
+      <canvas id="game" aria-label="A circular ring with bouncing balls"></canvas>
+      <div class="stats" aria-live="polite">
+        <div class="stat"><strong id="pops">0</strong><span>Pops</span></div>
+        <div class="stat"><strong id="inside">0</strong><span>In the ring</span></div>
+      </div>
+    </section>
+    <div class="controls">
+      <button id="drop" type="button">＋ &nbsp; Drop a ball</button>
+      <button id="modeToggle" class="secondary" type="button">Switch to Closing Ring</button>
+    </div>
+    <section class="settings" aria-label="Game settings">
+      <div class="setting">
+        <label for="speed">Ball speed <output id="speedValue">154 px/s</output></label>
+        <input id="speed" type="range" min="1" max="20" value="14" step="1">
+        <div class="range-ends"><span>1</span><span>20</span></div>
+      </div>
+      <div class="setting">
+        <label for="growth"><span id="impactLabel">Radius per hit</span><output id="growthValue">+5.6 px</output></label>
+        <input id="growth" type="range" min="1" max="20" value="8" step="1">
+        <div class="range-ends"><span id="impactLow">1×</span><span id="impactHigh">20×</span></div>
+      </div>
+      <div class="setting">
+        <label for="ringSize">Starting ring size <output id="ringValue">82% arena</output></label>
+        <input id="ringSize" type="range" min="1" max="20" value="16" step="1">
+        <div class="range-ends"><span>1</span><span>20</span></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const canvas = document.querySelector('#game');
+      const ctx = canvas.getContext('2d');
+      const button = document.querySelector('#drop');
+      const popsLabel = document.querySelector('#pops');
+      const insideLabel = document.querySelector('#inside');
+      const speedSlider = document.querySelector('#speed');
+      const speedValue = document.querySelector('#speedValue');
+      const growthSlider = document.querySelector('#growth');
+      const growthValue = document.querySelector('#growthValue');
+      const ringSlider = document.querySelector('#ringSize');
+      const ringValue = document.querySelector('#ringValue');
+      const modeToggle = document.querySelector('#modeToggle');
+      const intro = document.querySelector('#intro');
+      const impactLabel = document.querySelector('#impactLabel');
+      const impactLow = document.querySelector('#impactLow');
+      const impactHigh = document.querySelector('#impactHigh');
+      const balls = [];
+      const particles = [];
+      let size = 0, center = 0, ringRadius = 0, fullRingRadius = 0, pops = 0, lastTime = 0;
+      let mode = 'grow', ringClosed = false;
+      const colors = ['#d2a94c','#478e7a','#ce7657','#8174b8','#bf6079','#4f83ad','#a0a660'];
+      const ballSpeed = () => size * (.07 + Number(speedSlider.value) * .015);
+      const growthPerHit = () => size * .00125 * Number(growthSlider.value);
+      const refreshSettingValues = () => {
+        const closing = mode === 'closing';
+        speedValue.textContent = `${Math.round(ballSpeed())} px/s${closing ? ' base' : ''}`;
+        growthValue.textContent = closing
+          ? `+${growthSlider.value}% / hit`
+          : `+${growthPerHit().toFixed(1)} px`;
+        ringValue.textContent = `${Math.round(fullRingRadius*2/size*100)}% arena`;
+      };
+      const syncSpeed = b => {
+        const current = Math.hypot(b.vx,b.vy);
+        if (current > 0) {
+          const target = ballSpeed() * (mode === 'closing' ? b.speedFactor : 1);
+          b.vx = b.vx/current*target; b.vy = b.vy/current*target;
+        }
+      };
+      const setRingSize = () => {
+        fullRingRadius = size * (.105 + (Number(ringSlider.value)-1) * .02025);
+        if (mode === 'grow' || !ringClosed) ringRadius = fullRingRadius;
+        refreshSettingValues();
+        for (let i=balls.length-1;i>=0;i--) {
+          const b=balls[i], dx=b.x-center, dy=b.y-center, dist=Math.hypot(dx,dy)||1;
+          if (b.r >= ringRadius-4) { burst(b.x,b.y,b.color); balls.splice(i,1); pops++; }
+          else if (dist+b.r > ringRadius-2) { b.x=center+dx/dist*(ringRadius-b.r-2); b.y=center+dy/dist*(ringRadius-b.r-2); }
+        }
+      };
+      const resize = () => {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.min(devicePixelRatio || 1, 2);
+        size = rect.width;
+        canvas.width = Math.round(size * dpr);
+        canvas.height = Math.round(size * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        center = size / 2;
+        setRingSize();
+      };
+      new ResizeObserver(resize).observe(canvas);
+
+      function addBall() {
+        if (ringClosed) { ringClosed=false; ringRadius=fullRingRadius; }
+        const angle = Math.random() * Math.PI * 2;
+        const speed = ballSpeed();
+        balls.push({ x:center, y:center, vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed,
+          r:Math.max(7,size*.022), speedFactor:1, color:colors[Math.floor(Math.random()*colors.length)], trail:[] });
+      }
+      function updateModeLabels() {
+        const closing = mode === 'closing';
+        modeToggle.textContent = closing ? 'Switch to Grow Mode' : 'Switch to Closing Ring';
+        intro.textContent = closing
+          ? 'Every collision speeds balls up. Wall hits close the ring.'
+          : 'Drop a ball into the ring. Every bump makes it grow.';
+        impactLabel.textContent = closing ? 'Speed boost per hit' : 'Radius per hit';
+        impactLow.textContent = closing ? '1%' : '1×';
+        impactHigh.textContent = closing ? '20%' : '20×';
+        refreshSettingValues();
+      }
+      modeToggle.addEventListener('click', () => {
+        mode = mode === 'grow' ? 'closing' : 'grow';
+        ringClosed = false;
+        ringRadius = fullRingRadius;
+        balls.forEach(b => { b.speedFactor=1; syncSpeed(b); });
+        updateModeLabels();
+      });
+      speedSlider.addEventListener('input', () => { balls.forEach(syncSpeed); refreshSettingValues(); });
+      growthSlider.addEventListener('input', updateModeLabels);
+      ringSlider.addEventListener('input', setRingSize);
+      button.addEventListener('click', addBall);
+      window.addEventListener('keydown', e => {
+        if (e.code === 'Space' && !e.repeat) { e.preventDefault(); addBall(); }
+      });
+
+      function burst(x,y,color) {
+        for (let i=0;i<24;i++) {
+          const a=Math.random()*Math.PI*2, s=30+Math.random()*130;
+          particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.55+Math.random()*.4,max:.95,color,r:2+Math.random()*2.5});
+        }
+      }
+      function closeRing() {
+        ringRadius=0;
+        ringClosed=true;
+        for (const b of balls) burst(b.x,b.y,b.color);
+        pops+=balls.length;
+        balls.length=0;
+      }
+      function boostBall(b) {
+        if (mode === 'closing') b.speedFactor *= 1 + Number(growthSlider.value)/100;
+        syncSpeed(b);
+      }
+      function update(dt) {
+        const maxRadius=ringRadius-4;
+        for (let i=balls.length-1;i>=0;i--) {
+          const b=balls[i];
+          if (mode==='closing' && b.r>=maxRadius) { closeRing(); break; }
+          if(b.r>=maxRadius) { burst(b.x,b.y,b.color); balls.splice(i,1); pops++; continue; }
+          b.x+=b.vx*dt; b.y+=b.vy*dt;
+          b.trail.push({x:b.x,y:b.y}); if(b.trail.length>9)b.trail.shift();
+          let dx=b.x-center,dy=b.y-center,dist=Math.hypot(dx,dy)||1;
+          if(dist+b.r>=ringRadius) {
+            const nx=dx/dist,ny=dy/dist,dot=b.vx*nx+b.vy*ny;
+            if(dot>0) {
+              // A tiny randomized tangent deflection stops perfectly straight back-and-forth paths.
+              let vx=b.vx-2*dot*nx, vy=b.vy-2*dot*ny;
+              const deflection=(Math.random()-.5)*.32;
+              const cos=Math.cos(deflection), sin=Math.sin(deflection);
+              b.vx=vx*cos-vy*sin; b.vy=vx*sin+vy*cos;
+              if (mode === 'grow') b.r+=growthPerHit();
+              else {
+                boostBall(b);
+                ringRadius=Math.max(0,ringRadius-size*.008);
+                if (ringRadius<=b.r+2) { closeRing(); break; }
+              }
+              syncSpeed(b);
+              burst(b.x+nx*b.r,b.y+ny*b.r,b.color);
+            }
+            if (ringClosed) break;
+            b.x=center+nx*(ringRadius-b.r-1); b.y=center+ny*(ringRadius-b.r-1);
+          }
+          for(let j=i-1;j>=0;j--) {
+            const o=balls[j], ox=b.x-o.x,oy=b.y-o.y,od=Math.hypot(ox,oy), nx=od>1e-6?ox/od:1, ny=od>1e-6?oy/od:0, min=b.r+o.r;
+            if(od<min) {
+              const rel=(b.vx-o.vx)*nx+(b.vy-o.vy)*ny;
+              if(rel<0) {
+                // Flip any inward normal motion so both balls leave the contact moving apart.
+                const bNormal=b.vx*nx+b.vy*ny;
+                const oNormal=o.vx*nx+o.vy*ny;
+                if(bNormal<0){b.vx-=2*bNormal*nx;b.vy-=2*bNormal*ny;}
+                if(oNormal>0){o.vx-=2*oNormal*nx;o.vy-=2*oNormal*ny;}
+                if (mode === 'grow') { b.r+=growthPerHit();o.r+=growthPerHit(); }
+                else { boostBall(b);boostBall(o); }
+                syncSpeed(b);syncSpeed(o);
+                burst((b.x+o.x)/2,(b.y+o.y)/2,b.color);
+              }
+              // Separate overlapping balls fully, including the space added by growth.
+              const overlap=b.r+o.r-od;
+              b.x+=nx*(overlap/2);b.y+=ny*(overlap/2);
+              o.x-=nx*(overlap/2);o.y-=ny*(overlap/2);
+            }
+          }
+          if (ringClosed) break;
+          if(b.r>=maxRadius) { burst(b.x,b.y,b.color); balls.splice(i,1); pops++; }
+        }
+        for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.97;p.vy*=.97;p.life-=dt;if(p.life<=0)particles.splice(i,1);}
+        popsLabel.textContent=pops;insideLabel.textContent=balls.length;
+      }
+      function draw() {
+        ctx.clearRect(0,0,size,size);
+        if (ringRadius>0) {
+          const halo=ctx.createRadialGradient(center,center,Math.max(0,ringRadius-9),center,center,ringRadius+17);
+          halo.addColorStop(0,'#d2ff7000');halo.addColorStop(.7,'#d2ff7015');halo.addColorStop(1,'#d2ff7000');
+          ctx.fillStyle=halo;ctx.beginPath();ctx.arc(center,center,ringRadius+17,0,Math.PI*2);ctx.fill();
+          ctx.beginPath();ctx.arc(center,center,ringRadius,0,Math.PI*2);ctx.strokeStyle='#f5f2ea';ctx.lineWidth=3;ctx.stroke();
+          if (ringRadius>7) { ctx.beginPath();ctx.arc(center,center,ringRadius-7,0,Math.PI*2);ctx.strokeStyle='#ffffff0b';ctx.lineWidth=1;ctx.stroke(); }
+        }
+        for(const p of particles){ctx.globalAlpha=Math.max(0,p.life/p.max);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();}
+        ctx.globalAlpha=1;
+        for(const b of balls){
+          for(let i=0;i<b.trail.length;i++){const t=b.trail[i],a=(i+1)/b.trail.length*.12;ctx.globalAlpha=a;ctx.fillStyle=b.color;ctx.beginPath();ctx.arc(t.x,t.y,b.r*(i/b.trail.length)*.65,0,Math.PI*2);ctx.fill();}
+          ctx.globalAlpha=1;
+          ctx.fillStyle=b.color;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();
+        }
+      }
+      function frame(now){const dt=Math.min((now-lastTime)/1000||0,.033);lastTime=now;update(dt);draw();requestAnimationFrame(frame);}
+      resize(); requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
